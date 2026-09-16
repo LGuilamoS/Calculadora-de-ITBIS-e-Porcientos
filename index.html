@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="ANSI">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Facturación e Impresión Multi-Formato</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+  <style>
+    body { background-color: #f4f6f9; }
+    .card-custom { border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+    .nav-pills .nav-link { font-weight: 600; padding: 10px 20px; }
+    .result-box { background-color: #e9ecef; border-radius: 8px; padding: 15px; }
+
+    /* ESTILOS DE IMPRESIÓN DINÁMICOS EN NAVEGADOR */
+    @media print {
+      body * { visibility: hidden; }
+      #printArea, #printArea * { visibility: visible; }
+      #printArea { position: absolute; left: 0; top: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body class="py-4">
+
+<!-- MODAL DE INICIO DE SESIÓN -->
+<div class="modal fade" id="loginModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content card-custom">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title fw-bold text-primary"><i class="bi bi-shield-lock-fill"></i> Autenticación de Usuario</h5>
+      </div>
+      <div class="modal-body p-4">
+        <form id="formLogin" onsubmit="iniciarSesion(event)">
+          <div class="mb-3">
+            <label class="form-label fw-bold">Usuario</label>
+            <input type="text" id="loginUser" class="form-control" placeholder="Ingrese usuario" autocomplete="off" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">Contraseña</label>
+            <input type="password" id="loginPass" class="form-control" placeholder="Ingrese contraseña" required>
+          </div>
+          <div id="loginError" class="alert alert-danger d-none py-2 small" role="alert">
+            Usuario o contraseña incorrectos.
+          </div>
+          <div class="d-grid gap-2 mt-4">
+            <button type="submit" class="btn btn-primary fw-bold">Iniciar Sesión</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container d-none" id="mainApp">
+  
+  <!-- BARRA DE USUARIO AUTENTICADO -->
+  <div class="d-flex justify-content-between align-items-center mb-3 p-3 bg-white card-custom">
+    <div>
+      <span class="text-muted">Bienvenido(a):</span>
+      <strong id="sessionUser" class="text-primary ms-1"></strong>
+      <span id="sessionRole" class="badge bg-secondary ms-2"></span>
+    </div>
+    <button class="btn btn-sm btn-outline-danger" onclick="cerrarSesion()">
+      <i class="bi bi-box-arrow-right"></i> Cerrar Sesión
+    </button>
+  </div>
+
+  <!-- NAVEGACIÓN PRINCIPAL (FILTRADA POR ROL) -->
+  <ul class="nav nav-pills nav-justified mb-4 card-custom bg-white p-2" id="mainTab" role="tablist">
+    <li class="nav-item" role="presentation" id="tabFacturacionContainer">
+      <button class="nav-link active" id="facturacion-tab" data-bs-toggle="pill" data-bs-target="#facturacion" type="button" role="tab">
+        <i class="bi bi-receipt"></i> 1. Módulo de Facturación
+      </button>
+    </li>
+    <li class="nav-item" role="presentation" id="tabCalculadoraContainer">
+      <button class="nav-link" id="calculadora-tab" data-bs-toggle="pill" data-bs-target="#calculadora" type="button" role="tab">
+        <i class="bi bi-calculator"></i> 2. Calculadora Directa e ITBIS / Divisas
+      </button>
+    </li>
+  </ul>
+
+  <div class="tab-content" id="mainTabContent">
+    
+    <!-- APARTADO 1: FACTURACIÓN -->
+    <div class="tab-pane fade show active" id="facturacion" role="tabpanel">
+      <div class="card card-custom p-4 bg-white">
+        
+        <div class="row mb-4 align-items-center">
+          <div class="col-md-6">
+            <h3 class="fw-bold text-primary mb-1"><i class="bi bi-file-earmark-text"></i> Factura de Venta</h3>
+            <p class="text-muted small mb-0">Gestión de productos con cálculo de ITBIS y descuentos</p>
+          </div>
+          <div class="col-md-6 text-md-end mt-3 mt-md-0">
+            <div class="d-inline-block text-start">
+              <label class="form-label fw-bold mb-1">No. FACTURA:</label>
+              <input type="text" id="numFactura" class="form-control form-control-sm text-end fw-bold text-primary" placeholder="Ej: #001042" value="#001042">
+              <small class="text-muted d-block text-end mt-1">Fecha: <span id="fechaFactura"></span></small>
+            </div>
+          </div>
+        </div>
+
+        <!-- DATOS DEL CLIENTE -->
+        <div class="row g-3 mb-4">
+          <div class="col-md-6">
+            <label class="form-label font-weight-bold">Cliente / Razón Social</label>
+            <input type="text" id="cliNombre" class="form-control" placeholder="Ej: Comercial Dominicana SRL" value="Comercial Dominicana SRL">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">RNC / Cédula / NCF</label>
+            <input type="text" id="cliRnc" class="form-control" placeholder="Ej: 101-00000-0 / B0100000001" value="101-00000-0">
+          </div>
+        </div>
+
+        <!-- TABLA DE PRODUCTOS -->
+        <div class="table-responsive mb-3">
+          <table class="table table-bordered align-middle">
+            <thead class="table-dark">
+              <tr>
+                <th style="width: 30%;">Detalle del servicio o venta del artículo</th>
+                <th style="width: 10%;">Cant.</th>
+                <th style="width: 15%;">Precio ($)</th>
+                <th style="width: 15%;">Modo ITBIS</th>
+                <th style="width: 12%;">Tasa ITBIS</th>
+                <th style="width: 10%;">Desc (%)</th>
+                <th style="width: 14%;">Total</th>
+                <th style="width: 4%;"></th>
+              </tr>
+            </thead>
+            <tbody id="itemsBody">
+              <!-- Filas dinámicas -->
+            </tbody>
+          </table>
+        </div>
+
+        <button type="button" class="btn btn-outline-primary mb-4" onclick="agregarFila()">
+          <i class="bi bi-plus-circle"></i> Agregar Artículo
+        </button>
+
+        <!-- RESUMEN Y BOTONES DE IMPRESIÓN POR FORMATO -->
+        <div class="row justify-content-end">
+          <div class="col-md-6">
+            <div class="bg-light p-3 rounded mb-3">
+              <div class="d-flex justify-content-between mb-1">
+                <span>Subtotal Base:</span>
+                <strong id="lblSubtotal">$0.00</strong>
+              </div>
+              <div class="d-flex justify-content-between mb-1 text-danger">
+                <span>Descuento Total:</span>
+                <strong id="lblDescuento">-$0.00</strong>
+              </div>
+              <div class="d-flex justify-content-between mb-1 text-info">
+                <span>ITBIS Total:</span>
+                <strong id="lblItbis">$0.00</strong>
+              </div>
+              <hr class="my-2">
+              <div class="d-flex justify-content-between fs-5 text-success">
+                <span>Total General:</span>
+                <strong id="lblTotal">$0.00</strong>
+              </div>
+            </div>
+
+            <h6 class="fw-bold mb-2"><i class="bi bi-printer"></i> Opciones de Impresión:</h6>
+            <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+              <button class="btn btn-primary flex-fill" onclick="imprimirFactura('A4')">
+                <i class="bi bi-file-pdf"></i> Hoja A4 / Mesa
+              </button>
+              <button class="btn btn-secondary flex-fill" onclick="imprimirFactura('POS80')">
+                <i class="bi bi-receipt-cutoff"></i> Ticket 80mm (POS)
+              </button>
+              <button class="btn btn-dark flex-fill" onclick="imprimirFactura('POS58')">
+                <i class="bi bi-phone"></i> Ticket 58mm (Mano)
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- APARTADO 2: CALCULADORA DIRECTA Y DIVISAS -->
+    <div class="tab-pane fade" id="calculadora" role="tabpanel">
+      <div class="row g-4">
+        
+        <!-- MÓDULO 1: ITBIS -->
+        <div class="col-md-6">
+          <div class="card card-custom h-100 p-4 bg-white">
+            <h4 class="card-title fw-bold text-dark mb-3">1. Cálculo de ITBIS</h4>
+            <p class="text-muted small">Calcula el ITBIS sobre un monto neto o extrae el ITBIS de un total que ya lo contiene.</p>
+
+            <div class="mb-3">
+              <label class="form-label">Monto ($)</label>
+              <input type="number" id="itbisMonto" class="form-control" placeholder="Ej: 1000" step="0.01">
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Tasa de ITBIS (%)</label>
+              <select id="itbisTasa" class="form-select">
+                <option value="18">18% (Tasa Estándar)</option>
+                <option value="16">16% (Tasa Reducida)</option>
+                <option value="0">0% (Exento)</option>
+              </select>
+            </div>
+
+            <div class="d-grid gap-2 mb-3">
+              <button onclick="calcularItbisAgregar()" class="btn btn-primary">Calcular y Agregar ITBIS</button>
+              <button onclick="calcularItbisExtraer()" class="btn btn-outline-secondary">Extraer ITBIS (Monto con ITBIS)</button>
+            </div>
+
+            <div class="result-box mt-auto">
+              <div>Subtotal / Base: <strong id="itbisBase">$0.00</strong></div>
+              <div>Monto ITBIS: <strong id="itbisValor" class="text-danger">$0.00</strong></div>
+              <hr class="my-2">
+              <div class="fs-5">Total Final: <strong id="itbisTotal" class="text-success">$0.00</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MÓDULO 2: DESCUENTO -->
+        <div class="col-md-6">
+          <div class="card card-custom h-100 p-4 bg-white">
+            <h4 class="card-title fw-bold text-dark mb-3">2. Reducción / Descuento de %</h4>
+            <p class="text-muted small">Resta un porcentaje específico a un monto determinado.</p>
+
+            <div class="mb-3">
+              <label class="form-label">Monto Total Original ($)</label>
+              <input type="number" id="descMonto" class="form-control" placeholder="Ej: 5000" step="0.01">
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Porcentaje a Reducir (%)</label>
+              <input type="number" id="descPorcentaje" class="form-control" placeholder="Ej: 10, 15" step="0.01">
+            </div>
+
+            <div class="d-grid gap-2 mb-3">
+              <button onclick="calcularDescuento()" class="btn btn-success">Calcular Reducción</button>
+            </div>
+
+            <div class="result-box mt-auto">
+              <div>Monto Original: <strong id="descBase">$0.00</strong></div>
+              <div>Monto Restado (%): <strong id="descValor" class="text-danger">-$0.00</strong></div>
+              <hr class="my-2">
+              <div class="fs-5">Total con Reducción: <strong id="descTotal" class="text-primary">$0.00</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MÓDULO 3: TASÓMETRO DE DIVISAS -->
+        <div class="col-md-12">
+          <div class="card card-custom p-4 bg-white">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h4 class="card-title fw-bold text-dark mb-0">
+                <i class="bi bi-currency-exchange text-warning"></i> 3. Tasómetro de Divisas (República Dominicana)
+              </h4>
+              <span class="badge bg-primary fs-6" id="tasasFecha">Consultando Mercado...</span>
+            </div>
+            <p class="text-muted small">Indicadores de la tasa de cambio de Dólares (USD) y Euros (EUR) frente al Peso Dominicano (DOP).</p>
+
+            <div class="row g-3 mb-4">
+              <div class="col-md-6">
+                <div class="p-3 border rounded bg-light text-center">
+                  <span class="text-muted small d-block font-weight-bold">DÓLAR ESTADOUNIDENSE (USD)</span>
+                  <h3 class="fw-bold text-primary my-1" id="tasaUSD">RD$ 0.00</h3>
+                  <small class="text-secondary">1 USD = RD$ <span id="valUSD">0.00</span></small>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="p-3 border rounded bg-light text-center">
+                  <span class="text-muted small d-block font-weight-bold">EURO (EUR)</span>
+                  <h3 class="fw-bold text-primary my-1" id="tasaEUR">RD$ 0.00</h3>
+                  <small class="text-secondary">1 EUR = RD$ <span id="valEUR">0.00</span></small>
+                </div>
+              </div>
+            </div>
+
+            <div class="row g-3 align-items-center bg-light p-3 rounded">
+              <div class="col-md-4">
+                <label class="form-label fw-bold">Monto a Convertir</label>
+                <input type="number" id="divisaMonto" class="form-control" placeholder="Ej: 100" step="0.01" oninput="convertirDivisa()">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label fw-bold">Moneda Origen:</label>
+                <select id="divisaOrigen" class="form-select" onchange="convertirDivisa()">
+                  <option value="USD">Dólares (USD)</option>
+                  <option value="EUR">Euros (EUR)</option>
+                  <option value="DOP">Pesos Dominicanos (DOP)</option>
+                </select>
+              </div>
+              <div class="col-md-1 text-center mt-4 d-none d-md-block">
+                <i class="bi bi-arrow-right-square-fill fs-3 text-primary"></i>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-bold">Resultado Equivalente</label>
+                <div class="form-control bg-white fw-bold text-success fs-5 text-truncate" id="divisaResultado">RD$ 0.00</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- CONTENEDOR OCULTO PARA IMPRESIÓN DINÁMICA -->
+<div id="printArea" style="display:none;"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  /* =========================================================================
+     GESTIÓN DE AUTENTICACIÓN Y ROLES DE USUARIO
+     ========================================================================= */
+  const USERS_DB = {
+    "admin": { pass: "P@ssw0rdss", role: "ADMINISTRADOR", name: "Administrador del Sistema" },
+    "operador": { pass: "123456", role: "OPERADOR", name: "Operador de Calculadoras" }
+  };
+
+  let modalInstance = null;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    modalInstance = new bootstrap.Modal(document.getElementById('loginModal'));
+    verificarSesion();
+  });
+
+  function verificarSesion() {
+    const activeSession = JSON.parse(sessionStorage.getItem('activeUser'));
+    if (activeSession) {
+      aplicarPermisos(activeSession);
+      document.getElementById('mainApp').classList.remove('d-none');
+      
+      document.getElementById('fechaFactura').innerText = new Date().toLocaleDateString('es-DO');
+      if (document.querySelectorAll('#itemsBody tr').length === 0) {
+        agregarFila();
+      }
+      cargarTasasDivisas();
+    } else {
+      document.getElementById('mainApp').classList.add('d-none');
+      modalInstance.show();
+    }
+  }
+
+  function iniciarSesion(e) {
+    e.preventDefault();
+    const userIn = document.getElementById('loginUser').value.trim();
+    const passIn = document.getElementById('loginPass').value.trim();
+    const errorAlert = document.getElementById('loginError');
+
+    if (USERS_DB[userIn] && USERS_DB[userIn].pass === passIn) {
+      const userData = {
+        username: userIn,
+        name: USERS_DB[userIn].name,
+        role: USERS_DB[userIn].role
+      };
+      sessionStorage.setItem('activeUser', JSON.stringify(userData));
+      errorAlert.classList.add('d-none');
+      document.getElementById('formLogin').reset();
+      modalInstance.hide();
+      verificarSesion();
+    } else {
+      errorAlert.classList.remove('d-none');
+    }
+  }
+
+  function cerrarSesion() {
+    sessionStorage.removeItem('activeUser');
+    location.reload();
+  }
+
+  function aplicarPermisos(user) {
+    document.getElementById('sessionUser').innerText = user.name;
+    document.getElementById('sessionRole').innerText = user.role;
+
+    const tabFact = document.getElementById('tabFacturacionContainer');
+    const tabCalcBtn = document.getElementById('calculadora-tab');
+    const tabFactBtn = document.getElementById('facturacion-tab');
+
+    if (user.role === 'OPERADOR') {
+      tabFact.style.display = 'none';
+      const calcTabTrigger = new bootstrap.Tab(tabCalcBtn);
+      calcTabTrigger.show();
+    } else {
+      tabFact.style.display = 'block';
+      const factTabTrigger = new bootstrap.Tab(tabFactBtn);
+      factTabTrigger.show();
+    }
+  }
+
+  const fmt = new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP' });
+
+  /* =========================================================================
+     MÓDULO DE FACTURACIÓN
+     ========================================================================= */
+  function agregarFila() {
+    const tbody = document.getElementById('itemsBody');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" class="form-control item-desc-name" placeholder="Escriba el detalle del servicio o venta del artículo"></td>
+      <td><input type="number" class="form-control item-cant" value="1" min="1" oninput="calcularFactura()"></td>
+      <td><input type="number" class="form-control item-precio" value="0.00" step="0.01" oninput="calcularFactura()"></td>
+      <td>
+        <select class="form-select item-modo-itbis" onchange="calcularFactura()">
+          <option value="agregar">Sumar ITBIS</option>
+          <option value="extraer">ITBIS Incluido</option>
+        </select>
+      </td>
+      <td>
+        <select class="form-select item-tasa-itbis" onchange="calcularFactura()">
+          <option value="18">18%</option>
+          <option value="16">16%</option>
+          <option value="0">0%</option>
+        </select>
+      </td>
+      <td><input type="number" class="form-control item-desc" value="0" min="0" max="100" step="0.01" oninput="calcularFactura()"></td>
+      <td class="text-end fw-bold item-total-row">$0.00</td>
+      <td class="text-center">
+        <button class="btn btn-sm btn-outline-danger" onclick="eliminarFila(this)"><i class="bi bi-trash"></i></button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+    calcularFactura();
+  }
+
+  function eliminarFila(btn) {
+    if (document.querySelectorAll('#itemsBody tr').length > 1) {
+      btn.closest('tr').remove();
+      calcularFactura();
+    }
+  }
+
+  function procesarITBIS(monto, tasaPorcentaje, modo) {
+    const tasa = tasaPorcentaje / 100;
+    let base = 0, valorItbis = 0;
+    if (modo === 'agregar') {
+      base = monto;
+      valorItbis = monto * tasa;
+    } else {
+      base = monto / (1 + tasa);
+      valorItbis = monto - base;
+    }
+    return { base, valorItbis };
+  }
+
+  function procesarDescuento(montoBase, pctDescuento) {
+    return montoBase * (pctDescuento / 100);
+  }
+
+  function calcularFactura() {
+    const filas = document.querySelectorAll('#itemsBody tr');
+    let subtotal = 0, descuento = 0, itbis = 0, total = 0;
+
+    filas.forEach(fila => {
+      const cant = parseFloat(fila.querySelector('.item-cant').value) || 0;
+      const precio = parseFloat(fila.querySelector('.item-precio').value) || 0;
+      const modo = fila.querySelector('.item-modo-itbis').value;
+      const tasa = parseFloat(fila.querySelector('.item-tasa-itbis').value) || 0;
+      const pctDesc = parseFloat(fila.querySelector('.item-desc').value) || 0;
+
+      const bruto = cant * precio;
+      const valDesc = procesarDescuento(bruto, pctDesc);
+      const conDesc = bruto - valDesc;
+      const resItbis = procesarITBIS(conDesc, tasa, modo);
+
+      const totalFila = modo === 'agregar' ? resItbis.base + resItbis.valorItbis : conDesc;
+      fila.querySelector('.item-total-row').textContent = fmt.format(totalFila);
+
+      subtotal += resItbis.base;
+      descuento += valDesc;
+      itbis += resItbis.valorItbis;
+      total += totalFila;
+    });
+
+    document.getElementById('lblSubtotal').textContent = fmt.format(subtotal);
+    document.getElementById('lblDescuento').textContent = '-' + fmt.format(descuento);
+    document.getElementById('lblItbis').textContent = fmt.format(itbis);
+    document.getElementById('lblTotal').textContent = fmt.format(total);
+  }
+
+  /* =========================================================================
+     IMPRESIÓN EN MÚLTIPLES FORMATOS DE IMPRESORA
+     ========================================================================= */
+  function imprimirFactura(formato) {
+    const numFac = document.getElementById('numFactura').value || '#000000';
+    const cliente = document.getElementById('cliNombre').value || 'Cliente General';
+    const rnc = document.getElementById('cliRnc').value || 'N/A';
+    const fecha = document.getElementById('fechaFactura').innerText;
+    
+    const filas = document.querySelectorAll('#itemsBody tr');
+    let itemsHTML = '';
+    
+    filas.forEach(f => {
+      const name = f.querySelector('.item-desc-name').value || 'Sin detalle';
+      const cant = f.querySelector('.item-cant').value;
+      const precio = fmt.format(f.querySelector('.item-precio').value);
+      const total = f.querySelector('.item-total-row').innerText;
+      itemsHTML += `
+        <tr>
+          <td>${name}</td>
+          <td style="text-align:center;">${cant}</td>
+          <td style="text-align:right;">${precio}</td>
+          <td style="text-align:right;">${total}</td>
+        </tr>`;
+    });
+
+    const subtotal = document.getElementById('lblSubtotal').innerText;
+    const descuento = document.getElementById('lblDescuento').innerText;
+    const itbis = document.getElementById('lblItbis').innerText;
+    const total = document.getElementById('lblTotal').innerText;
+
+    let widthStyle = 'width: 100%; max-width: 800px; font-size: 14px;';
+    if (formato === 'POS80') widthStyle = 'width: 78mm; font-size: 11px; font-family: monospace;';
+    if (formato === 'POS58') widthStyle = 'width: 54mm; font-size: 9px; font-family: monospace;';
+
+    const printArea = document.getElementById('printArea');
+    printArea.style.display = 'block';
+    printArea.innerHTML = `
+      <div style="margin: 0 auto; ${widthStyle}">
+        <h3 style="text-align:center; margin-bottom: 2px;">FACTURA DE VENTA</h3>
+        <p style="text-align:center; margin-top: 0;">No. ${numFac} - Fecha: ${fecha}</p>
+        <hr>
+        <p><strong>Cliente:</strong> ${cliente}<br><strong>RNC/NCF:</strong> ${rnc}</p>
+        <table style="width:100%; border-collapse: collapse;" border="1">
+          <thead>
+            <tr>
+              <th>Detalle del servicio o venta del artículo</th>
+              <th>Cant</th>
+              <th>Prec.</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>${itemsHTML}</tbody>
+        </table>
+        <br>
+        <div style="text-align:right;">
+          <p style="margin:2px;">Subtotal Base: ${subtotal}</p>
+          <p style="margin:2px;">Descuento: ${descuento}</p>
+          <p style="margin:2px;">ITBIS: ${itbis}</p>
+          <h4>TOTAL: ${total}</h4>
+        </div>
+        <p style="text-align:center; margin-top:15px;">¡Gracias por su compra!</p>
+      </div>
+    `;
+
+    window.print();
+    printArea.style.display = 'none';
+  }
+
+  /* =========================================================================
+     MÓDULO CALCULADORA DIRECTA (ITBIS Y DESCUENTO)
+     ========================================================================= */
+  function calcularItbisAgregar() {
+    const monto = parseFloat(document.getElementById('itbisMonto').value) || 0;
+    const tasa = parseFloat(document.getElementById('itbisTasa').value) / 100;
+    const valorItbis = monto * tasa;
+    const total = monto + valorItbis;
+    document.getElementById('itbisBase').textContent = fmt.format(monto);
+    document.getElementById('itbisValor').textContent = fmt.format(valorItbis);
+    document.getElementById('itbisTotal').textContent = fmt.format(total);
+  }
+
+  function calcularItbisExtraer() {
+    const total = parseFloat(document.getElementById('itbisMonto').value) || 0;
+    const tasa = parseFloat(document.getElementById('itbisTasa').value) / 100;
+    const base = total / (1 + tasa);
+    const valorItbis = total - base;
+    document.getElementById('itbisBase').textContent = fmt.format(base);
+    document.getElementById('itbisValor').textContent = fmt.format(valorItbis);
+    document.getElementById('itbisTotal').textContent = fmt.format(total);
+  }
+
+  function calcularDescuento() {
+    const monto = parseFloat(document.getElementById('descMonto').value) || 0;
+    const pct = parseFloat(document.getElementById('descPorcentaje').value) || 0;
+    const valorDescuento = monto * (pct / 100);
+    const totalConDescuento = monto - valorDescuento;
+    document.getElementById('descBase').textContent = fmt.format(monto);
+    document.getElementById('descValor').textContent = '-' + fmt.format(valorDescuento);
+    document.getElementById('descTotal').textContent = fmt.format(totalConDescuento);
+  }
+
+  /* =========================================================================
+     MÓDULO 3: TASÓMETRO Y CONVERTIDOR DE DIVISAS
+     ========================================================================= */
+  let tasasActuales = { USD: 60.50, EUR: 65.80 };
+
+  async function cargarTasasDivisas() {
+    try {
+      const res = await fetch('https://open.er-api.com/v6/latest/USD');
+      const data = await res.json();
+      
+      if (data && data.rates && data.rates.DOP) {
+        const usdDop = data.rates.DOP;
+        const eurUsd = 1 / data.rates.EUR;
+        const eurDop = eurUsd * usdDop;
+
+        tasasActuales = { USD: usdDop, EUR: eurDop };
+        document.getElementById('tasasFecha').innerText = `Mercado Oficial (${new Date().toLocaleDateString('es-DO')})`;
+      } else {
+        throw new Error("Respuesta inválida");
+      }
+    } catch (err) {
+      document.getElementById('tasasFecha').innerText = `Tasa de Referencia Local (${new Date().toLocaleDateString('es-DO')})`;
+    }
+
+    document.getElementById('tasaUSD').innerText = `RD$ ${tasasActuales.USD.toFixed(2)}`;
+    document.getElementById('valUSD').innerText = tasasActuales.USD.toFixed(2);
+    document.getElementById('tasaEUR').innerText = `RD$ ${tasasActuales.EUR.toFixed(2)}`;
+    document.getElementById('valEUR').innerText = tasasActuales.EUR.toFixed(2);
+
+    convertirDivisa();
+  }
+
+  function convertirDivisa() {
+    const monto = parseFloat(document.getElementById('divisaMonto').value) || 0;
+    const origen = document.getElementById('divisaOrigen').value;
+    let resultadoText = '';
+
+    if (origen === 'USD') {
+      const dop = monto * tasasActuales.USD;
+      const eur = (monto * tasasActuales.USD) / tasasActuales.EUR;
+      resultadoText = `RD$ ${dop.toLocaleString('es-DO', {minimumFractionDigits: 2, maximumFractionDigits: 2})} / €${eur.toFixed(2)}`;
+    } else if (origen === 'EUR') {
+      const dop = monto * tasasActuales.EUR;
+      const usd = (monto * tasasActuales.EUR) / tasasActuales.USD;
+      resultadoText = `RD$ ${dop.toLocaleString('es-DO', {minimumFractionDigits: 2, maximumFractionDigits: 2})} / $${usd.toFixed(2)}`;
+    } else if (origen === 'DOP') {
+      const usd = monto / tasasActuales.USD;
+      const eur = monto / tasasActuales.EUR;
+      resultadoText = `$${usd.toFixed(2)} USD / €${eur.toFixed(2)} EUR`;
+    }
+
+    document.getElementById('divisaResultado').innerText = resultadoText;
+  }
+</script>
+
+</body>
+</html>
